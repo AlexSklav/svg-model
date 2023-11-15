@@ -1,32 +1,32 @@
-from __future__ import absolute_import
-from __future__ import unicode_literals
-import numpy as np
-import pandas as pd
+# coding: utf-8
 import warnings
 
+import numpy as np
+import pandas as pd
+
+from typing import List, Optional
+
 from .svgload import svg_parser
-import six
 
 
-def get_shape_areas(df_shapes, shape_i_columns, signed=False):
-    '''
+def get_shape_areas(df_shapes: pd.DataFrame, shape_i_columns: List[str], signed: Optional[bool] = False) -> float:
+    """
     Return a `pandas.Series` indexed by `shape_i_columns` (i.e., each entry
     corresponds to a single shape/polygon), containing the following columns
     the area of each shape.
 
     If `signed=True`, a positive area value corresponds to a clockwise loop,
     whereas a negative area value corresponds to a counter-clockwise loop.
-    '''
+    """
     # Make a copy of the SVG data frame since we need to add columns to it.
     df_i = df_shapes.copy()
-    df_i['vertex_count'] = (df_i.groupby(shape_i_columns)['x']
-                            .transform('count'))
+    df_i['vertex_count'] = df_i.groupby(shape_i_columns)['x'].transform('count')
     df_i['area_a'] = df_i.x
     df_i['area_b'] = df_i.y
 
     # Vector form of [Shoelace formula][1].
     #
-    # [1]: http://en.wikipedia.org/wiki/Shoelace_formula
+    # [1]: https://en.wikipedia.org/wiki/Shoelace_formula
     df_i.loc[df_i.vertex_i == df_i.vertex_count - 1, 'area_a'] *= df_i.loc[df_i.vertex_i == 0, 'y'].values
     df_i.loc[df_i.vertex_i < df_i.vertex_count - 1, 'area_a'] *= df_i.loc[df_i.vertex_i > 0, 'y'].values
 
@@ -44,14 +44,14 @@ def get_shape_areas(df_shapes, shape_i_columns, signed=False):
         return shape_areas
 
 
-def get_bounding_boxes(df_shapes, shape_i_columns):
-    '''
+def get_bounding_boxes(df_shapes: pd.DataFrame, shape_i_columns: List[str]) -> pd.DataFrame:
+    """
     Return a `pandas.DataFrame` indexed by `shape_i_columns` (i.e., each row
     corresponds to a single shape/polygon), containing the following columns:
 
      - `width`: The width of the widest part of the shape.
      - `height`: The height of the tallest part of the shape.
-    '''
+    """
     xy_groups = df_shapes.groupby(shape_i_columns)[['x', 'y']]
     xy_min = xy_groups.agg('min')
     xy_max = xy_groups.agg('max')
@@ -60,24 +60,24 @@ def get_bounding_boxes(df_shapes, shape_i_columns):
     return xy_min.join(shapes)
 
 
-def get_shape_infos(df_shapes, shape_i_columns):
-    '''
+def get_shape_infos(df_shapes: pd.DataFrame, shape_i_columns: List[str]) -> pd.DataFrame:
+    """
     Return a `pandas.DataFrame` indexed by `shape_i_columns` (i.e., each row
     corresponds to a single shape/polygon), containing the following columns:
 
      - `area`: The area of the shape.
      - `width`: The width of the widest part of the shape.
      - `height`: The height of the tallest part of the shape.
-    '''
+    """
     shape_areas = get_shape_areas(df_shapes, shape_i_columns)
     bboxes = get_bounding_boxes(df_shapes, shape_i_columns)
     return bboxes.join(pd.DataFrame(shape_areas))
 
 
-def get_bounding_box(df_points):
-    '''
+def get_bounding_box(df_points: pd.DataFrame) -> pd.DataFrame:
+    """
     Calculate the bounding box of all points in a data frame.
-    '''
+    """
     xy_min = df_points[['x', 'y']].min()
     xy_max = df_points[['x', 'y']].max()
 
@@ -88,27 +88,23 @@ def get_bounding_box(df_points):
     return bbox
 
 
-def close_paths(df_svg):
+def close_paths(df_svg: pd.DataFrame) -> pd.DataFrame:
     # Initialize the closing point for each path based on the first point in
     # the path.
     close_points = df_svg.groupby('path_id').nth(0)
     # Set index of closing vertex (point) to next index in sequence for each
     # path.
     close_points.loc[:, 'vertex_i'] = df_svg.groupby('path_id')['path_id'].count()
-    return pd.concat([df_svg,
-                      close_points.reset_index()]).sort(df_svg.columns[:3]
-                                                        .tolist())
+    return pd.concat([df_svg, close_points.reset_index()]).sort_values(df_svg.columns[:3].tolist())
 
 
-def get_nearest_neighbours(path_centers):
+def get_nearest_neighbours(path_centers: pd.DataFrame) -> pd.DataFrame:
     x_m, x_n = np.meshgrid(path_centers.x.values, path_centers.x.values)
     y_m, y_n = np.meshgrid(path_centers.y.values, path_centers.y.values)
 
     distances = np.sqrt((x_m - x_n) ** 2 + (y_m - y_n) ** 2)
 
-    nearest_neighbour_i = (np.finfo(distances.dtype).max *
-                           np.eye(distances.shape[0]) +
-                           distances).argmin(axis=1)
+    nearest_neighbour_i = (np.finfo(distances.dtype).max * np.eye(distances.shape[0]) + distances).argmin(axis=1)
     nearest_centers = path_centers.iloc[nearest_neighbour_i].reset_index()
     nearest_centers.index = path_centers.index
     nearest_neighbors = path_centers.join(nearest_centers, rsuffix='_closest')
@@ -116,9 +112,8 @@ def get_nearest_neighbours(path_centers):
 
 
 # ## Deprecated ##
-def get_svg_path_frame(svg_path):
-    warnings.warn('get_svg_path_frame function is deprecated.  Use '
-                  '`svg_model.svg_polygons_to_df`')
+def get_svg_path_frame(svg_path) -> pd.DataFrame:
+    warnings.warn('get_svg_path_frame function is deprecated.  Use `svg_model.svg_polygons_to_df`')
     frames = []
     for i, loop_i in enumerate(svg_path.loops):
         verts = pd.DataFrame(loop_i.verts, columns=['x', 'y'])
@@ -129,13 +124,12 @@ def get_svg_path_frame(svg_path):
 
 
 # ## Deprecated ##
-def get_svg_frame(svg_filepath):
-    warnings.warn('get_svg_frame function is deprecated.  Use '
-                  '`svg_model.svg_polygons_to_df`')
+def get_svg_frame(svg_filepath: str) -> pd.DataFrame:
+    warnings.warn('get_svg_frame function is deprecated.  Use `svg_model.svg_polygons_to_df`')
     parser = svg_parser.SvgParser()
     svg = parser.parse_file(svg_filepath, lambda *args: None)
     frames = []
-    for k, p in six.iteritems(svg.paths):
+    for k, p in svg.paths.items():
         svg_frame = get_svg_path_frame(p)
         svg_frame.insert(0, 'path_id', k)
         frames.append(svg_frame)
@@ -143,9 +137,8 @@ def get_svg_frame(svg_filepath):
 
 
 # ## Deprecated ##
-def triangulate_svg_frame(svg_frame):
-    warnings.warn('triangulate_svg_frame function is deprecated.  Use '
-                  '`svg_model.tesselate.tesselate_shapes_frame`')
+def triangulate_svg_frame(svg_frame: pd.DataFrame) -> pd.DataFrame:
+    warnings.warn('triangulate_svg_frame function is deprecated.  Use `svg_model.tesselate.tesselate_shapes_frame`')
     from .seidel import Triangulator
 
     triangle_frames = []

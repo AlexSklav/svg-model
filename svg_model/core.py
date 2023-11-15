@@ -1,22 +1,24 @@
 # coding: utf-8
 import re
 import warnings
+from typing import List, Dict, Optional, Tuple, Union
 
 from .data_frame import get_bounding_boxes
 
 from io import StringIO
-import lxml
+from lxml import etree
 import pandas as pd
 import pint  # Unit conversion from inches to mm
 
 from ._version import get_versions
+
 __version__ = get_versions()['version']
 del get_versions
 
 XHTML_NAMESPACE = "http://www.w3.org/2000/svg"
-NSMAP = {'svg' : XHTML_NAMESPACE}
+NSMAP = {'svg': XHTML_NAMESPACE}
 INKSCAPE_NSMAP = NSMAP.copy()
-INKSCAPE_NSMAP['inkscape'] = 'http://www.inkscape.org/namespaces/inkscape'
+INKSCAPE_NSMAP['inkscape'] = 'https://www.inkscape.org/namespaces/inkscape'
 
 # Convert Inkscape pixels-per-inch (PPI) to pixels-per-mm (PPmm).
 ureg = pint.UnitRegistry()
@@ -25,42 +27,89 @@ INKSCAPE_PPI = 90
 INKSCAPE_PPmm = INKSCAPE_PPI / (1 * ureg.inch).to('mm')
 
 float_pattern = r'[+-]?\d+(\.\d+)?([eE][+-]?\d+)?'  # 2, 1.23, 23e39, 1.23e-6, etc.
-cre_path_command = re.compile(r'((?P<xy_command>[ML])\s+(?P<x>{0}),\s*(?P<y>{0})\s*|'
-                              r'(?P<x_command>[H])\s+(?P<hx>{0})\s*|'
-                              r'(?P<y_command>[V])\s+(?P<vy>{0})\s*|'
-                              r'(?P<command>[Z]\s*))'
-                              .format(float_pattern))
+cre_path_command = re.compile(rf'((?P<xy_command>[ML])\s+(?P<x>{float_pattern}),\s*(?P<y>{float_pattern})\s*|'
+                              rf'(?P<x_command>[H])\s+(?P<hx>{float_pattern})\s*|'
+                              rf'(?P<y_command>[V])\s+(?P<vy>{float_pattern})\s*|'
+                              rf'(?P<command>[Z]\s*|'
+                              rf'(?P<curve_command>[CQ])\s+'
+                              rf'((?P<curve_x1>{float_pattern}),\s*(?P<curve_y1>{float_pattern}),\s*'
+                              rf'(?P<curve_x2>{float_pattern}),\s*(?P<curve_y2>{float_pattern}),\s*)?'
+                              rf'(?P<curve_x>{float_pattern}),\s*(?P<curve_y>{float_pattern})\s*))'
+                              rf'|'
+                              rf'(?P<relative_command>[lhv])\s+(?P<relative_values>(?:{float_pattern}\s*,?\s*)+)'
+                              )
 
 
-def shape_path_points(svg_path_d):
-    '''
+def shape_path_points(svg_path_d: str) -> List[Dict[str, float]]:
+    """
+    Extracts and returns a list of coordinates of points found in the SVG path.
+
     Parameters
     ----------
     svg_path_d : str
-        ``"d"`` attribute of SVG ``path`` element.
+        The "d" attribute of an SVG "path" element.
 
     Returns
     -------
-    list
-        List of coordinates of points found in SVG path.
+    List[Dict[str, float]]
+        A list of dictionaries, where each dictionary contains the "x" and "y"
+        coordinates of a point.
 
-        Each point is represented by a dictionary with keys ``x`` and ``y``.
-    '''
+    Notes
+    -----
+    This function currently supports the following SVG path commands:
+    - M: Move to (absolute)
+    - L: Line to (absolute)
+    - H: Horizontal line to (absolute)
+    - V: Vertical line to (absolute)
+    - Z: Close path (absolute)
+    - l: Line to (relative)
+    - h: Horizontal line to (relative)
+    - v: Vertical line to (relative)
+
+    Each point is represented by a dictionary with keys "x" and "y".
+    """
+
     # TODO Add support for relative commands, e.g., `l, h, v`.
-    def _update_path_state(path_state, match):
+
+    def _update_path_state(path_state: Dict[str, float], match: re.Match) -> Dict[str, float]:
         if match.group('xy_command'):
             for dim_j in 'xy':
                 path_state[dim_j] = float(match.group(dim_j))
             if path_state.get('x0') is None:
                 for dim_j in 'xy':
-                    path_state['%s0' % dim_j] = path_state[dim_j]
+                    path_state[f'{dim_j}0'] = path_state[dim_j]
         elif match.group('x_command'):
             path_state['x'] = float(match.group('hx'))
         elif match.group('y_command'):
             path_state['y'] = float(match.group('vy'))
         elif match.group('command') == 'Z':
             for dim_j in 'xy':
-                path_state[dim_j] = path_state['%s0' % dim_j]
+                path_state[dim_j] = path_state[f'{dim_j}0']
+        elif match.group('relative_command'):
+            relative_command = match.group('relative_command')
+            relative_values = [float(v) for v in re.findall(float_pattern, match.group('relative_values'))]
+
+            if relative_command == 'l':
+                path_state['x'] += relative_values[0]
+                path_state['y'] += relative_values[1]
+            elif relative_command == 'h':
+                path_state['x'] += relative_values[0]
+            elif relative_command == 'v':
+                path_state['y'] += relative_values[0]
+        elif match.group('curve_command'):
+            curve_command = match.group('curve_command')
+            curve_values = [float(v) for v in re.findall(float_pattern, match.group('curve_values'))]
+
+            if curve_command == 'C':
+                # Handle cubic Bezier curve command
+                pass
+
+            elif curve_command == 'Q':
+                # Handle quadratic Bezier curve command
+                pass
+
+            raise NotImplementedError('Bezier curve commands are not supported')
         return path_state
 
     # Some commands in a SVG path element `"d"` attribute require previous state.
@@ -75,9 +124,9 @@ def shape_path_points(svg_path_d):
              if k in 'xy'} for match_i in cre_path_command.finditer(svg_path_d)]
 
 
-def svg_shapes_to_df(svg_source, xpath='//svg:path | //svg:polygon',
-                     namespaces=INKSCAPE_NSMAP):
-    '''
+def svg_shapes_to_df(svg_source: str, xpath: str = '//svg:path | //svg:polygon',
+                     namespaces: Optional[Dict[str, str]] = None) -> pd.DataFrame:
+    """
     Construct a data frame with one row per vertex for all shapes in
     :data:`svg_source``.
 
@@ -103,8 +152,9 @@ def svg_shapes_to_df(svg_source, xpath='//svg:path | //svg:polygon',
          - ``y``: The y-coordinate of the vertex.
          - other: attributes of the SVG shape element (e.g., ``id``, ``fill``,
             etc.)
-    '''
-    from lxml import etree
+    """
+    if namespaces is None:
+        namespaces = INKSCAPE_NSMAP
 
     e_root = etree.parse(svg_source)
     frames = []
@@ -121,37 +171,30 @@ def svg_shapes_to_df(svg_source, xpath='//svg:path | //svg:polygon',
     for shape_i in e_root.xpath(xpath, namespaces=namespaces):
         attribs_set.update(list(shape_i.attrib.keys()))
 
-    for k in ('d', 'points'):
-        if k in attribs_set:
-            attribs_set.remove(k)
-
-    attribs = list(sorted(attribs_set))
-
+    attribs_set.discard('d')
+    attribs_set.discard('points')
+    attribs = sorted(attribs_set)
     # Always add 'id' attribute as first attribute.
-    if 'id' in attribs:
-        attribs.remove('id')
     attribs.insert(0, 'id')
 
     for shape_i in e_root.xpath(xpath, namespaces=namespaces):
         # Gather shape attributes from SVG element.
         base_fields = [shape_i.attrib.get(k, None) for k in attribs]
 
-        if shape_i.tag == '{http://www.w3.org/2000/svg}path':
+        if shape_i.tag == f'{{{XHTML_NAMESPACE}}}path':
             # Decode `svg:path` vertices from [`"d"`][1] attribute.
             #
             # [1]: https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/d
             points_i = [base_fields + [i] + [point_i.get(k) for k in 'xy']
-                        for i, point_i in
-                        enumerate(shape_path_points(shape_i.attrib['d']))]
-        elif shape_i.tag == '{http://www.w3.org/2000/svg}polygon':
+                        for i, point_i in enumerate(shape_path_points(shape_i.attrib['d']))]
+        elif shape_i.tag == f'{{{XHTML_NAMESPACE}}}polygon':
             # Decode `svg:polygon` vertices from [`"points"`][2] attribute.
             #
             # [2]: https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/points
             points_i = [base_fields + [i] + list(map(float, v.split(',')))
-                        for i, v in enumerate(shape_i.attrib['points']
-                                              .strip().split(' '))]
+                        for i, v in enumerate(shape_i.attrib['points'].strip().split(' '))]
         else:
-            warnings.warning('Unsupported shape tag type: %s' % shape_i.tag)
+            warnings.warn(f'Unsupported shape tag type: {shape_i.tag}')
             continue
         frames.extend(points_i)
     if not frames:
@@ -161,47 +204,8 @@ def svg_shapes_to_df(svg_source, xpath='//svg:path | //svg:polygon',
     return pd.DataFrame(frames, columns=attribs + ['vertex_i', 'x', 'y'])
 
 
-def svg_polygons_to_df(svg_source, xpath='//svg:polygon',
-                       namespaces=INKSCAPE_NSMAP):
-    '''
-    Construct a data frame with one row per vertex for all shapes (e.g.,
-    ``svg:path``, ``svg:polygon``) in :data:`svg_source``.
-
-    Arguments
-    ---------
-    svg_source : str or file-like
-        A file path, URI, or file-like object.
-    xpath : str, optional
-        XPath path expression to select shape nodes.
-    namespaces : dict, optional
-        Key/value mapping of XML namespaces.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Frame with one row per vertex for all shapes in :data:`svg_source`,
-        with the following columns:
-         - ``path_id``: The ``id`` attribute of the corresponding shape.
-         - ``vertex_i``: The index of the vertex within the corresponding
-           shape.
-         - ``x``: The x-coordinate of the vertex.
-         - ``y``: The y-coordinate of the vertex.
-
-
-    .. note:: Deprecated in :mod:`svg_model` 0.5.post10
-        :func:`svg_polygons_to_df` will be removed in :mod:`svg_model` 1.0, it
-        is replaced by :func:`svg_shapes_to_df` because the latter is more
-        general and works with ``svg:path`` and ``svg:polygon`` elements.
-    '''
-    warnings.warn("The `svg_polygons_to_df` function is deprecated.  Use "
-                  "`svg_shapes_to_df` instead.")
-    result = svg_shapes_to_df(svg_source, xpath=xpath, namespaces=namespaces)
-    return result[['id', 'vertex_i', 'x', 'y']].rename(columns={'id':
-                                                                'path_id'})
-
-
-def compute_shape_centers(df_shapes, shape_i_column, inplace=False):
-    '''
+def compute_shape_centers(df_shapes: pd.DataFrame, shape_i_column: str, inplace: bool = False) -> pd.DataFrame:
+    """
     Compute the center point of each polygon shape, and the offset of each
     vertex to the corresponding polygon center point.
 
@@ -218,7 +222,7 @@ def compute_shape_centers(df_shapes, shape_i_column, inplace=False):
     shape_i_column : str or list, optional
         Table rows with the same value in the :data:`shape_i_column` column are
         grouped together as a shape.
-    in_place : bool, optional
+    inplace : bool, optional
         If ``True``, center coordinate columns are added directly to the input
         frame.
 
@@ -232,29 +236,29 @@ def compute_shape_centers(df_shapes, shape_i_column, inplace=False):
          - ``x_center``/``y_center``: Absolute coordinates of shape center.
          - ``x_center_offset``/``y_center_offset``:
              * Coordinates of each vertex coordinate relative to shape center.
-    '''
+    """
     if not isinstance(shape_i_column, bytes):
         raise KeyError('Shape index must be a single column.')
 
     if not inplace:
         df_shapes = df_shapes.copy()
 
-    # Get coordinates of center of each path.
+    # Get coordinates of the center of each path.
     df_bounding_boxes = get_bounding_boxes(df_shapes, shape_i_column)
     path_centers = (df_bounding_boxes[['x', 'y']] + .5 *
                     df_bounding_boxes[['width', 'height']].values)
     df_shapes['x_center'] = path_centers.x[df_shapes[shape_i_column]].values
     df_shapes['y_center'] = path_centers.y[df_shapes[shape_i_column]].values
 
-    # Calculate coordinate of each path vertex relative to center point of
+    # Calculate the coordinates of each path vertex relative to center point of
     # path.
-    center_offset = (df_shapes[['x', 'y']] -
-                     df_shapes[['x_center', 'y_center']].values)
+    center_offset = df_shapes[['x', 'y']] - df_shapes[['x_center', 'y_center']].values
     return df_shapes.join(center_offset, rsuffix='_center_offset')
 
 
-def scale_points(df_points, scale=INKSCAPE_PPmm.magnitude, inplace=False):
-    '''
+def scale_points(df_points: pd.DataFrame, scale: float = INKSCAPE_PPmm.magnitude,
+                 inplace: bool = False) -> pd.DataFrame:
+    """
     Translate points such that bounding box is anchored at (0, 0) and scale
     ``x`` and ``y`` columns of input frame by specified :data:`scale`.
 
@@ -273,7 +277,7 @@ def scale_points(df_points, scale=INKSCAPE_PPmm.magnitude, inplace=False):
         pixels-per-inch.
     scale : float, optional
         Factor to scale points by.
-    in_place : bool, optional
+    inplace : bool, optional
         If ``True``, input frame will be modified.
 
         Otherwise, the scaled points are written to a new frame, leaving the
@@ -285,7 +289,7 @@ def scale_points(df_points, scale=INKSCAPE_PPmm.magnitude, inplace=False):
         Input frame with the points translated such that bounding box is
         anchored at (0, 0) and ``x`` and ``y`` values scaled by specified
         :data:`scale`.
-    '''
+    """
     if not inplace:
         df_points = df_points.copy()
 
@@ -300,8 +304,8 @@ def scale_points(df_points, scale=INKSCAPE_PPmm.magnitude, inplace=False):
     return df_points
 
 
-def scale_to_fit_a_in_b(a_shape, b_shape):
-    '''
+def scale_to_fit_a_in_b(a_shape: pd.Series, b_shape: pd.Series) -> float:
+    """
     Return scale factor (scalar float) to fit `a_shape` into `b_shape` while
     maintaining aspect ratio.
 
@@ -315,7 +319,7 @@ def scale_to_fit_a_in_b(a_shape, b_shape):
     float
         Scale factor to fit :data:`a_shape` into :data:`b_shape` while
         maintaining aspect ratio.
-    '''
+    """
     # Normalize the shapes to allow comparison.
     a_shape_normal = a_shape / a_shape.max()
     b_shape_normal = b_shape / b_shape.max()
@@ -329,8 +333,9 @@ def scale_to_fit_a_in_b(a_shape, b_shape):
     return a_shape_normal.max() * b_shape.max() / a_shape.max()
 
 
-def fit_points_in_bounding_box(df_points, bounding_box, padding_fraction=0):
-    '''
+def fit_points_in_bounding_box(df_points: pd.DataFrame, bounding_box: pd.Series,
+                               padding_fraction: float = 0) -> pd.DataFrame:
+    """
     Return data frame with ``x``, ``y`` columns scaled to fit points from
     :data:`df_points` to fill :data:`bounding_box` while maintaining aspect
     ratio.
@@ -350,19 +355,17 @@ def fit_points_in_bounding_box(df_points, bounding_box, padding_fraction=0):
     pandas.DataFrame
         Input frame with the points with ``x`` and ``y`` values scaled to fill
         :data:`bounding_box` while maintaining aspect ratio.
-    '''
+    """
     df_scaled_points = df_points.copy()
-    offset, padded_scale = fit_points_in_bounding_box_params(df_points,
-                                                             bounding_box,
-                                                             padding_fraction)
+    offset, padded_scale = fit_points_in_bounding_box_params(df_points, bounding_box, padding_fraction)
     df_scaled_points[['x', 'y']] *= padded_scale
     df_scaled_points[['x', 'y']] += offset
     return df_scaled_points
 
 
-def fit_points_in_bounding_box_params(df_points, bounding_box,
-                                      padding_fraction=0):
-    '''
+def fit_points_in_bounding_box_params(df_points: pd.DataFrame, bounding_box: pd.Series,
+                                      padding_fraction: float = 0, ) -> Tuple[pd.Series, float]:
+    """
     Return offset and scale factor to scale ``x``, ``y`` columns of
     :data:`df_points` to fill :data:`bounding_box` while maintaining aspect
     ratio.
@@ -385,13 +388,13 @@ def fit_points_in_bounding_box_params(df_points, bounding_box,
         ratio.
 
         :data:`offset` contains ``x`` and ``y`` values for the offset.
-    '''
+    """
     width = df_points.x.max()
     height = df_points.y.max()
 
     points_bbox = pd.Series([width, height], index=['width', 'height'])
     fill_scale = 1 - 2 * padding_fraction
-    assert(fill_scale > 0)
+    assert fill_scale > 0
 
     scale = scale_to_fit_a_in_b(points_bbox, bounding_box)
 
@@ -401,8 +404,8 @@ def fit_points_in_bounding_box_params(df_points, bounding_box,
     return offset, padded_scale
 
 
-def remove_layer(svg_source, layer_name):
-    '''
+def remove_layer(svg_source: str, layer_name: Union[str, List[str]]) -> StringIO:
+    """
     Remove layer(s) from SVG document.
 
     Arguments
@@ -416,18 +419,17 @@ def remove_layer(svg_source, layer_name):
     -------
     StringIO.StringIO
         File-like object containing XML document with layer(s) removed.
-    '''
+    """
     # Parse input file.
-    xml_root = lxml.etree.parse(svg_source)
+    xml_root = etree.parse(svg_source)
     svg_root = xml_root.xpath('/svg:svg', namespaces=INKSCAPE_NSMAP)[0]
 
     if isinstance(layer_name, str):
         layer_name = [layer_name]
 
     for layer_name_i in layer_name:
-        # Remove existing layer from source, in-memory XML (source file remains
-        # unmodified).
-        layer_xpath = '//svg:g[@inkscape:label="%s"]' % layer_name_i
+        # Remove existing layer from source, in-memory XML (source file remains unmodified).
+        layer_xpath = f'//svg:g[@inkscape:label="{layer_name_i}"]'
         layer_groups = svg_root.xpath(layer_xpath, namespaces=INKSCAPE_NSMAP)
 
         if layer_groups:
@@ -435,20 +437,7 @@ def remove_layer(svg_source, layer_name):
                 g.getparent().remove(g)
 
     # Write result to `StringIO`.
-    output = StringIO.StringIO()
+    output = StringIO()
     xml_root.write(output)
     output.seek(0)
     return output
-
-
-# ## Deprecated ##
-def get_scaled_svg_frame(svg_filepath, **kwargs):
-    '''
-    .. note:: Deprecated in :mod:`svg_model` 0.5
-        :func:`get_scaled_svg_frame` was removed in :mod:`svg_model` 0.5, it is
-        replaced by :func:`svg_model.scale_points` and
-        :func:`svg_model.compute_shape_centers`.
-    '''
-    raise NotImplementedError('get_scaled_svg_frame function is deprecated. '
-                              'Use `svg_model.scale_points` and '
-                              '`svg_model.compute_shape_centers`')

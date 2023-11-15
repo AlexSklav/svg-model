@@ -1,8 +1,6 @@
 # coding: utf-8
-from __future__ import absolute_import
-from __future__ import unicode_literals
-import types
-
+from io import StringIO
+from typing import Union
 from lxml import etree
 
 from .connections import extract_adjacent_shapes
@@ -10,20 +8,20 @@ from .draw import draw_lines_svg_layer
 from . import INKSCAPE_NSMAP, compute_shape_centers, svg_shapes_to_df
 
 
-def auto_detect_adjacent_shapes(svg_source, shape_i_attr='id',
-                                layer_name='Connections',
-                                shapes_xpath='//svg:path | //svg:polygon',
-                                extend=1.5):
-    '''
-    Attempt to automatically find "adjacent" shapes in a SVG layer.
+def auto_detect_adjacent_shapes(svg_source: Union[str, StringIO], shape_i_attr: str = 'id',
+                                layer_name: str = 'Connections',
+                                shapes_xpath: str = '//svg:path | //svg:polygon',
+                                extend: float = 1.5) -> StringIO:
+    """
+    Attempt to automatically find "adjacent" shapes in an SVG layer.
 
     In a layer within a new SVG document, draw each detected connection between
     the center points of the corresponding shapes.
 
     Parameters
     ----------
-    svg_source : str
-        Input SVG file as a filepath (or file-like object).
+    svg_source : str or StringIO
+        Input SVG file as a filepath or file-like object.
     shape_i_attr : str, optional
         Attribute of each shape SVG element that uniquely identifies the shape.
     layer_name : str, optional
@@ -35,7 +33,7 @@ def auto_detect_adjacent_shapes(svg_source, shape_i_attr='id',
 
         By default, all ``svg:path`` and ``svg:polygon`` elements are selected.
     extend : float, optional
-        Extend ``x``/``y`` coords by the specified number of absolute units
+        Extend x/y coords by the specified number of absolute units
         from the center point of each shape.
 
         Each shape is stretched independently in the ``x`` and ``y`` direction.
@@ -44,11 +42,11 @@ def auto_detect_adjacent_shapes(svg_source, shape_i_attr='id',
 
     Returns
     -------
-    StringIO.StringIO
+    StringIO
         File-like object containing SVG document with layer named according to
         :data:`layer_name` with the detected connections drawn as ``svg:line``
         instances.
-    '''
+    """
     # Read SVG polygons into dataframe, one row per polygon vertex.
     df_shapes = svg_shapes_to_df(svg_source, xpath=shapes_xpath)
     df_shapes = compute_shape_centers(df_shapes, shape_i_attr)
@@ -73,9 +71,7 @@ def auto_detect_adjacent_shapes(svg_source, shape_i_attr='id',
                                    .reset_index(drop=True), lsuffix='_source',
                                    rsuffix='_target'))
 
-    # Remove existing connections layer from source, in-memory XML (source file
-    # remains unmodified).  A new connections layer will be added below.
-    connections_xpath = '//svg:g[@inkscape:label="%s"]' % layer_name
+    connections_xpath = f'//svg:g[@inkscape:label="{layer_name}"]'
     connections_groups = svg_root.xpath(connections_xpath,
                                         namespaces=INKSCAPE_NSMAP)
 
@@ -83,13 +79,11 @@ def auto_detect_adjacent_shapes(svg_source, shape_i_attr='id',
         for g in connections_groups:
             g.getparent().remove(g)
 
-    # Create in-memory SVG
-    svg_output = \
-        draw_lines_svg_layer(df_connection_centers
-                             .rename(columns={'x_center_source': 'x_source',
-                                              'y_center_source': 'y_source',
-                                              'x_center_target': 'x_target',
-                                              'y_center_target': 'y_target'}),
-                             layer_name=layer_name)
+    svg_output = draw_lines_svg_layer(df_connection_centers
+                                      .rename(columns={'x_center_source': 'x_source',
+                                                       'y_center_source': 'y_source',
+                                                       'x_center_target': 'x_target',
+                                                       'y_center_target': 'y_target'}),
+                                      layer_name=layer_name)
 
     return svg_output

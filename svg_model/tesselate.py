@@ -1,14 +1,13 @@
 # coding: utf-8
-from __future__ import absolute_import
-from __future__ import unicode_literals
-import types
-
 import pandas as pd
+
+from typing import Union, List
+
 from .seidel import Triangulator
 
 
-def tesselate_shapes_frame(df_shapes, shape_i_columns):
-    '''
+def tesselate_shapes_frame(df_shapes: pd.DataFrame, shape_i_columns: Union[str, List[str]]) -> pd.DataFrame:
+    """
     Tesselate each shape path into one or more triangles.
 
     Parameters
@@ -32,9 +31,9 @@ def tesselate_shapes_frame(df_shapes, shape_i_columns):
      - ``shape_i_columns[]``: The shape path index column(s).
      - ``triangle_i``: The integer triangle index within each electrode path.
      - ``vertex_i``: The integer vertex index within each triangle.
-    '''
+    """
     frames = []
-    if isinstance(shape_i_columns, bytes):
+    if isinstance(shape_i_columns, str):
         shape_i_columns = [shape_i_columns]
 
     for shape_i, df_path in df_shapes.groupby(shape_i_columns):
@@ -44,16 +43,16 @@ def tesselate_shapes_frame(df_shapes, shape_i_columns):
             points_i = points_i[:-1]
         try:
             triangulator = Triangulator(points_i)
-        except:
+        except Exception as e:
+            # Handle exception gracefully.
+            print(f"Error during triangulation: {e}")
             import pdb; pdb.set_trace()
             continue
         if not isinstance(shape_i, (list, tuple)):
             shape_i = [shape_i]
 
         for i, triangle_i in enumerate(triangulator.triangles()):
-            triangle_points_i = [shape_i + [i] + [j, x, y]
-                                 for j, (x, y) in enumerate(triangle_i)]
+            triangle_points_i = [shape_i + [i] + [j, x, y] for j, (x, y) in enumerate(triangle_i)]
             frames.extend(triangle_points_i)
     frames = None if not frames else frames
-    return pd.DataFrame(frames, columns=shape_i_columns +
-                        ['triangle_i', 'vertex_i', 'x', 'y'])
+    return pd.DataFrame(frames, columns=shape_i_columns + ['triangle_i', 'vertex_i', 'x', 'y'])

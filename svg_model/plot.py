@@ -1,50 +1,38 @@
-from __future__ import absolute_import
-from __future__ import unicode_literals
-from collections import OrderedDict
+# coding: utf-8
 import itertools
+
+import pandas as pd
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import pandas as pd
 
 
-def plot_shapes(df_shapes, shape_i_columns, axis=None, autoxlim=True,
-                autoylim=True, **kwargs):
-    '''
+def plot_shapes(df_shapes: pd.DataFrame, shape_i_columns: list, axis=None, autoxlim: bool = True,
+                autoylim: bool = True, **kwargs) -> mpl.axes._axes.Axes:
+    """
     Plot shapes from table/data-frame where each row corresponds to a vertex of
     a shape.  Shape vertices are grouped by `shape_i_columns`.
 
-    For example, consider the following dataframe:
+    Args:
+        df_shapes (pd.DataFrame): DataFrame containing shape vertices.
+        shape_i_columns (list): Columns used for shape grouping.
+        axis (mpl.axes._axes.Axes, optional): Matplotlib axis. Defaults to None.
+        autoxlim (bool, optional): Adjust x-axis limits. Defaults to True.
+        autoylim (bool, optional): Adjust y-axis limits. Defaults to True.
+        **kwargs: Additional keyword arguments.
 
-            shape_i  vertex_i  x          y
-        0   0        0         81.679949  264.69306
-        1   0        1         81.679949  286.51788
-        2   0        2         102.87004  286.51788
-        3   0        3         102.87004  264.69306
-        4   1        0         103.11417  264.40011
-        5   1        1         103.11417  242.72177
-        6   1        2         81.435824  242.72177
-        7   1        3         81.435824  264.40011
-        8   2        0         124.84134  264.69306
-        9   2        1         103.65125  264.69306
-        10  2        2         103.65125  286.37141
-        11  2        3         124.84134  286.37141
-
-    This dataframe corresponds to three shapes, with (ordered) shape vertices
-    grouped by `shape_i`.  Note that the column `vertex_i` is not required.
-    '''
+    Returns:
+        mpl.axes._axes.Axes: Matplotlib axis.
+    """
     if axis is None:
         fig, axis = plt.subplots()
     props = itertools.cycle(mpl.rcParams['axes.prop_cycle'])
     color = kwargs.pop('fc', None)
 
-    # Cycle through default colors to set face color, unless face color was set
-    # explicitly.
-    patches = [Polygon(df_shape_i[['x', 'y']].values, fc=props.next()['color']
-                       if color is None else color, **kwargs)
+    patches = [Polygon(df_shape_i[['x', 'y']].values, fc=next(props)['color'] if color is None else color, **kwargs)
                for shape_i, df_shape_i in df_shapes.groupby(shape_i_columns)]
 
     collection = PatchCollection(patches)
@@ -59,43 +47,31 @@ def plot_shapes(df_shapes, shape_i_columns, axis=None, autoxlim=True,
     return axis
 
 
-def plot_shapes_heat_map(df_shapes, shape_i_columns, values, axis=None,
-                         vmin=None, vmax=None, value_formatter=None,
-                         color_map=None):
-    '''
-    Plot polygon shapes, colored based on values mapped onto
-    a colormap.
+def plot_shapes_heat_map(df_shapes: pd.DataFrame, shape_i_columns: list, values: pd.Series, axis=None, vmin=None,
+                         vmax=None, value_formatter=None, color_map=None) -> tuple:
+    """
+    Plot polygon shapes, colored based on values mapped onto a colormap.
 
-    Args
-    ----
+    Args:
+        df_shapes (pd.DataFrame): Polygon table containing shape coordinates.
+        shape_i_columns (list): Columns used for shape grouping.
+        values (pd.Series): Numeric values indexed by shape identifiers.
+        axis (mpl.axes._axes.Axes, optional): Matplotlib axis. Defaults to None.
+        vmin (float, optional): Minimum value for color mapping. Defaults to None.
+        vmax (float, optional): Maximum value for color mapping. Defaults to None.
+        value_formatter (str, optional): Format string for colorbar labels. Defaults to None.
+        color_map (mpl.colors.Colormap, optional): Matplotlib colormap. Defaults to None.
 
-        df_shapes (pandas.DataFrame) : Polygon table containing
-            the columns `'id', 'x', 'y'`.  Coordinates must be
-            ordered to be grouped by `'id'`.
-        values (pandas.Series) : Numeric values indexed by `'id'`.
-            These values are used to look up color in the color map.
-        axis : A matplotlib axis.  If `None`, an axis is created.
-        vmin : Minimum value to clip values at.
-        vmax : Maximum value to clip values at.
-        color_map : A matplotlib color map (see `matplotlib.cm`).
-
-    Returns
-    -------
-
-        (tuple) : First element is heat map axis, second element
-            is colorbar axis.
-    '''
+    Returns:
+        tuple: Heat map axis and colorbar axis.
+    """
     df_shapes = df_shapes.copy()
+    df_shapes['y'] = df_shapes.y.max() - df_shapes.y.values
 
-    # Matplotlib draws from bottom to top, so invert `y` coordinates.
-    df_shapes.loc[:, 'y'] = df_shapes.y.max() - df_shapes.y.copy().values
-
-    aspect_ratio = ((df_shapes.x.max() - df_shapes.x.min()) /
-                    (df_shapes.y.max() - df_shapes.y.min()))
+    aspect_ratio = (df_shapes.x.max() - df_shapes.x.min()) / (df_shapes.y.max() - df_shapes.y.min())
 
     if vmin is not None or vmax is not None:
-        norm = mpl.colors.Normalize(vmin=vmin or min(values),
-                                    vmax=vmax or max(values))
+        norm = mpl.colors.Normalize(vmin=vmin or values.min(), vmax=vmax or values.max())
     else:
         norm = None
 
@@ -104,14 +80,11 @@ def plot_shapes_heat_map(df_shapes, shape_i_columns, values, axis=None,
     else:
         fig = axis.get_figure()
 
-    patches = OrderedDict([(id, Polygon(df_shape_i[['x', 'y']].values))
-                           for id, df_shape_i in
-                           df_shapes.groupby(shape_i_columns)])
+    patches = {id_: Polygon(df_shape_i[['x', 'y']].values) for id_, df_shape_i in df_shapes.groupby(shape_i_columns)}
     patches = pd.Series(patches)
 
-    collection = PatchCollection(patches.values, cmap=color_map,
-                                 norm=norm)
-    collection.set_array(values.ix[patches.index])
+    collection = PatchCollection(patches.values, cmap=color_map, norm=norm)
+    collection.set_array(values.loc[patches.index].values)
 
     axis.add_collection(collection)
 
@@ -119,15 +92,13 @@ def plot_shapes_heat_map(df_shapes, shape_i_columns, values, axis=None,
 
     # Append color axis to the right of `axis`, with 10% width of `axis`.
     color_axis = axis_divider.append_axes("right", size="10%", pad=0.05)
-
-    colorbar = fig.colorbar(collection, format=value_formatter,
-                            cax=color_axis)
+    colorbar = fig.colorbar(collection, format=value_formatter, cax=color_axis)
 
     tick_labels = colorbar.ax.get_yticklabels()
     if vmin is not None:
-        tick_labels[0] = '$\leq$%s' % tick_labels[0].get_text()
+        tick_labels[0] = f'$\leq$ {tick_labels[0].get_text()}'
     if vmax is not None:
-        tick_labels[-1] = '$\geq$%s' % tick_labels[-1].get_text()
+        tick_labels[-1] = f'$\geq$ {tick_labels[-1].get_text()}'
     colorbar.ax.set_yticklabels(tick_labels)
 
     axis.set_xlim(df_shapes.x.min(), df_shapes.x.max())
@@ -135,32 +106,26 @@ def plot_shapes_heat_map(df_shapes, shape_i_columns, values, axis=None,
     return axis, colorbar
 
 
-def plot_color_map_bars(values, vmin=None, vmax=None, color_map=None,
-                        axis=None, **kwargs):
-    '''
-    Plot bar for each value in `values`, colored based on values mapped onto
-    the specified color map.
+def plot_color_map_bars(values: pd.Series, vmin=None, vmax=None, color_map=None, axis=None,
+                        **kwargs) -> mpl.axes._axes.Axes:
+    """
+    Plot bar for each value in `values`, colored based on values mapped onto the specified color map.
 
-    Args
-    ----
+    Args:
+        values (pd.Series): Numeric values to plot bars.
+        vmin (float, optional): Minimum value for color mapping. Defaults to None.
+        vmax (float, optional): Maximum value for color mapping. Defaults to None.
+        color_map (mpl.colors.Colormap, optional): Matplotlib colormap. Defaults to None.
+        axis (mpl.axes._axes.Axes, optional): Matplotlib axis. Defaults to None.
+        **kwargs: Additional keyword arguments for plotting.
 
-        values (pandas.Series) : Numeric values to plot one bar per value.
-        axis : A matplotlib axis.  If `None`, an axis is created.
-        vmin : Minimum value to clip values at.
-        vmax : Maximum value to clip values at.
-        color_map : A matplotlib color map (see `matplotlib.cm`).
-        **kwargs : Extra keyword arguments to pass to `values.plot`.
-
-    Returns
-    -------
-
-        (axis) : Bar plot axis.
-    '''
+    Returns:
+        mpl.axes._axes.Axes: Matplotlib axis for the bar plot.
+    """
     if axis is None:
         fig, axis = plt.subplots()
 
-    norm = mpl.colors.Normalize(vmin=vmin or min(values),
-                                vmax=vmax or max(values), clip=True)
+    norm = mpl.colors.Normalize(vmin=vmin or values.min(), vmax=vmax or values.max(), clip=True)
     if color_map is None:
         color_map = mpl.rcParams['image.cmap']
     colors = color_map(norm(values.values).filled())

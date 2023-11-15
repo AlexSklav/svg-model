@@ -3,14 +3,11 @@
 {% else %}
 {% set GIT_VERSION = GIT_DESCRIBE_TAG[1:] %}
 {% endif %}
-
-# Source will be downloaded prior to filling in jinja templates
-source:
-  git_url: ../
-
+{% set PKG_NAME = 'svg-model' %}
+{% set MODULE_NAME = PKG_NAME.replace('-', '_') %}
 package:
-    name: svg-model
-    version: {{ GIT_VERSION }}
+  name: {{ PKG_NAME }}
+  version: {{ GIT_VERSION }}
 
 build:
     noarch: python
@@ -21,29 +18,40 @@ build:
 
 requirements:
     build:
+        - python >=3.8
         - lxml
         - pandas
-        # Work around https://github.com/conda-forge/pint-feedstock/issues/23
         - funcsigs
         - pandas
         - pint
-        - pymunk >=4.0.0,<5.0
+        - pymunk >=6.0.0
         - pyparsing
         - svgwrite
-        - path_helpers
+        - path-helpers
 
     run:
+        - python >=3.8
         - lxml
         - pandas
-        # Work around https://github.com/conda-forge/pint-feedstock/issues/23
         - funcsigs
         - pandas
         - pint
-        - pymunk >=4.0.0,<5.0
+        - pymunk >=6.0.0
         - pyparsing
         - svgwrite
-        - path_helpers
+        - path-helpers
 
 test:
     imports:
         - svg_model
+
+about:
+  home: https://github.com/sci-bots/{{ PKG_NAME }}
+  license: LGPLv2.1
+  summary: A Python module for parsing an SVG file to a group of paths.
+
+# source will be downloaded prior to filling in jinja templates
+# Example assumes that this folder has setup.py in it
+source:
+#  git_url: ../
+  path: ..

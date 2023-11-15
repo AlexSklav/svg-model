@@ -1,25 +1,23 @@
 # coding: utf-8
-from __future__ import absolute_import
-from __future__ import unicode_literals
-import types
+from typing import List, Optional, Union
+
+import pymunk
 
 import numpy as np
 import pandas as pd
-import pymunk
 
-from . import (svg_polygons_to_df, fit_points_in_bounding_box,
-               fit_points_in_bounding_box_params)
+from . import svg_shapes_to_df, fit_points_in_bounding_box, fit_points_in_bounding_box_params
 from .tesselate import tesselate_shapes_frame
 from .point_query import get_shapes_pymunk_space
 
 
-def get_transform(offset, scale):
-    '''
+def get_transform(offset: pd.Series, scale: float) -> pd.DataFrame:
+    """
     Parameters
     ----------
     offset : pandas.Series
         Cartesian ``(x, y)`` coordinate of offset origin.
-    scale : pandas.Series
+    scale : float
         Scaling factor for ``x`` and ``y`` dimensions.
 
     Returns
@@ -27,13 +25,12 @@ def get_transform(offset, scale):
     pandas.DataFrame
         3x3 transformation matrix resulting in specified `x/y` offset and
         scale.  **Note that third row label is ``w`` and not ``z``).**
-    '''
-    return pd.DataFrame([[scale, 0, offset.x], [0, scale, offset.y],
-                         [0, 0, 1]], index=['x', 'y', 'w'])
+    """
+    return pd.DataFrame([[scale, 0, offset.x], [0, scale, offset.y], [0, 0, 1]], index=['x', 'y', 'w'])
 
 
-class ShapesCanvas(object):
-    '''
+class ShapesCanvas:
+    """
     The `ShapesCanvas` class fits all shapes defined by vertices in a
     `pandas.DataFrame` (one vertex per row) into a specified canvas shape (with
     optional padding), while maintaining aspect ratio.
@@ -41,10 +38,11 @@ class ShapesCanvas(object):
     The `ShapesCanvas.find_shape` method returns the shape located at the
     specified *canvas* coordinates (or `None`, if no shape intersects with
     specified point).
-    '''
-    def __init__(self, df_shapes, shape_i_columns, canvas_shape=None,
-                 padding_fraction=0):
-        '''
+    """
+
+    def __init__(self, df_shapes: pd.DataFrame, shape_i_columns: Union[str, List[str]],
+                 canvas_shape: Optional[pd.Series] = None, padding_fraction: float = 0):
+        """
         Arguments
         ---------
 
@@ -54,27 +52,31 @@ class ShapesCanvas(object):
            shape.
          - `canvas_shape`: A `pandas.Series`-like object with a `width` and a
            `height`.
-        '''
+        """
+        self.canvas_to_shapes_transform = None
+        self.shapes_to_canvas_transform = None
+        self.canvas_scale = None
+        self.canvas_offset = None
+        self.df_bounding_shapes = None
+        self.df_canvas_shapes = None
+        self.canvas_shape = None
         self.df_shapes = df_shapes
-        if isinstance(shape_i_columns, bytes):
+        if isinstance(shape_i_columns, str):
             shape_i_columns = [shape_i_columns]
         self.shape_i_columns = shape_i_columns
 
         # Scale and center source points to canvas shape.
-        self.source_shape = pd.Series(df_shapes[['x', 'y']].max().values,
-                                      index=['width', 'height'])
+        self.source_shape = pd.Series(df_shapes[['x', 'y']].max().values, index=['width', 'height'])
 
         # Tesselate electrode polygons into convex shapes (triangles), for
         # compatability with `pymunk`.
-        self.df_tesselations = tesselate_shapes_frame(self.df_shapes,
-                                                      shape_i_columns)
+        self.df_tesselations = tesselate_shapes_frame(self.df_shapes, shape_i_columns)
 
         # Create `pymunk` space and add a body for each convex shape.  Each
         # body is mapped to the original shape identifier through
         # `canvas_bodies`.
         self.space, self.bodies = get_shapes_pymunk_space(self.df_tesselations,
-                                                          shape_i_columns +
-                                                          ['triangle_i'])
+                                                          shape_i_columns + ['triangle_i'])
         self.padding_fraction = padding_fraction
         self.reset_shape(canvas_shape, self.padding_fraction)
 
@@ -85,19 +87,15 @@ class ShapesCanvas(object):
             padding_fraction = self.padding_fraction
         self.canvas_shape = canvas_shape
 
-        self.df_canvas_shapes = fit_points_in_bounding_box(self.df_shapes,
-                                                           canvas_shape,
-                                                           padding_fraction=
-                                                           padding_fraction)
+        self.df_canvas_shapes = fit_points_in_bounding_box(self.df_shapes, canvas_shape,
+                                                           padding_fraction=padding_fraction)
 
         # Compute shape (i.e., width and height) of bounding box for each
         # canvas shape.
-        df_bounding_coords = (self.df_canvas_shapes.groupby('id')[['x', 'y']]
-                              .agg(['min', 'max']))
+        df_bounding_coords = self.df_canvas_shapes.groupby('id')[['x', 'y']].agg(['min', 'max'])
         bounding_width = df_bounding_coords.x['max'] - df_bounding_coords.x['min']
         bounding_height = df_bounding_coords.y['max'] - df_bounding_coords.y['min']
-        self.df_bounding_shapes = pd.DataFrame(np.column_stack([bounding_width,
-                                                                bounding_height]),
+        self.df_bounding_shapes = pd.DataFrame(np.column_stack([bounding_width, bounding_height]),
                                                columns=['width', 'height'],
                                                index=df_bounding_coords.index)
 
@@ -106,42 +104,28 @@ class ShapesCanvas(object):
             self.canvas_scale = 1.
         else:
             # Get x/y-offset and scale for later use.
-            self.canvas_offset, self.canvas_scale = \
-                fit_points_in_bounding_box_params(self.df_shapes, canvas_shape,
-                                                  padding_fraction=
-                                                  padding_fraction)
+            self.canvas_offset, self.canvas_scale = fit_points_in_bounding_box_params(self.df_shapes, canvas_shape,
+                                                                                      padding_fraction=padding_fraction)
 
         # Create transformation matrix to map from shapes coordinate space to
         # canvas coordinate space.
-        self.shapes_to_canvas_transform = get_transform(self.canvas_offset,
-                                                        self.canvas_scale)
-        self.canvas_to_shapes_transform = \
-            np.linalg.inv(self.shapes_to_canvas_transform)
+        self.shapes_to_canvas_transform = get_transform(self.canvas_offset, self.canvas_scale)
+        self.canvas_to_shapes_transform = np.linalg.inv(self.shapes_to_canvas_transform)
 
     @classmethod
-    def from_svg(cls, svg_filepath, *args, **kwargs):
+    def from_svg(cls, svg_filepath: str, *args, **kwargs):
         # Read SVG polygons into dataframe, one row per polygon vertex.
-        df_shapes = svg_polygons_to_df(svg_filepath)
+        df_shapes = svg_shapes_to_df(svg_filepath, xpath='//svg:polygon')
+        return cls(df_shapes, 'id', *args, **kwargs)
 
-        return cls(df_shapes, 'path_id', *args, **kwargs)
-
-    def find_shape(self, canvas_x, canvas_y):
-        '''
+    def find_shape(self, canvas_x: float, canvas_y: float) -> Union[pymunk.Body, None]:
+        """
         Look up shape based on canvas coordinates.
-        '''
-        shape_x, shape_y, w = self.canvas_to_shapes_transform.dot([canvas_x,
-                                                                   canvas_y,
-                                                                   1])
-        if hasattr(self.space, 'point_query_first'):
-            # Assume `pymunk<5.0`.
-            shape = self.space.point_query_first((shape_x, shape_y))
-        else:
-            # Assume `pymunk>=5.0`, where `point_query_first` method has been
-            # deprecated.
-            info = self.space.point_query_nearest((shape_x, shape_y), 0,
-                                                  [pymunk.ShapeFilter
-                                                   .ALL_CATEGORIES])
-            shape = info.shape if info else None
+        """
+        shape_x, shape_y, w = self.canvas_to_shapes_transform.dot([canvas_x, canvas_y, 1])
+        info = self.space.point_query_nearest((shape_x, shape_y), max_distance=0,
+                                              shape_filter=pymunk.ShapeFilter())
+        shape = info.shape if info else None
 
         if shape:
             return self.bodies[shape.body]

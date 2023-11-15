@@ -4,5 +4,7 @@ include setup.py
 recursive-include svg_model *
 recursive-exclude svg_model *.pyc
 recursive-exclude svg_model *~
+exclude .DS_Store
+recursive-exclude svg_model .DS_Store
 include versioneer.py
 include svg_model/_version.py

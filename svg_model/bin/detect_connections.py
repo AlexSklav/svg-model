@@ -1,7 +1,7 @@
 # coding: utf-8
-from __future__ import absolute_import
-from __future__ import unicode_literals
 import sys
+
+from argparse import ArgumentParser
 
 from path_helpers import path
 
@@ -10,17 +10,11 @@ from ..detect_connections import auto_detect_adjacent_shapes
 from ..merge import merge_svg_layers
 
 
-def parse_args(args=None):
+def parse_args():
     """Parses arguments, returns (options, args)."""
-    from argparse import ArgumentParser
-
-    if args is None:
-        args = sys.argv
-
-    parser = ArgumentParser(description='''
-Attempt to automatically find "adjacent" shapes in a SVG layer, and on a second
-SVG layer, draw each detected connection between the center points of the
-corresponding shapes.'''.strip())
+    parser = ArgumentParser(description='Attempt to automatically find "adjacent" shapes in a SVG layer, '
+                                        'and on a second SVG layer, draw each detected connection between '
+                                        'the center points of the corresponding shapes.'.strip())
     parser.add_argument('svg_input_file', type=path, default=None)
     parser.add_argument('svg_output_file', type=path, default="-",
                         help='Output file path ("-" for stdout)', nargs='?')
@@ -29,8 +23,7 @@ corresponding shapes.'''.strip())
     args = parser.parse_args()
 
     if not args.overwrite and (args.svg_input_file == args.svg_output_file):
-        parser.error('Input and output file are the same.  Use `-f` to force '
-                     'overwrite.')
+        parser.error('Input and output file are the same.  Use `-f` to force overwrite.')
 
     return args
 
@@ -42,13 +35,10 @@ if __name__ == '__main__':
 
     # Remove existing "Connections" layer and merge new "Connections" layer
     # with original SVG.
-    output_svg = merge_svg_layers([remove_layer(args.svg_input_file,
-                                                'Connections'),
-                                   connections_svg])
+    output_svg = merge_svg_layers([remove_layer(args.svg_input_file, 'Connections'), connections_svg])
 
     if args.svg_output_file == '-':
         # Write to standard output stream.
         sys.stdout.write(output_svg.getvalue())
     else:
-        with open(args.svg_output_file, 'wb') as output:
-            output.write(output_svg.getvalue())
+        path(args.svg_output_file).write_text(output_svg.getvalue())

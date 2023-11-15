@@ -1,4 +1,4 @@
-'''
+"""
 This is a New BSD License.
 http://www.opensource.org/licenses/bsd-license.php
 
@@ -12,68 +12,69 @@ Redistribution and use in source and binary forms, with or without modification,
     * Neither the name of Jonathan Hartley nor the names of contributors may be used to endorse or promote products derived from this software without specific prior written permission.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-'''
-import gtk
+"""
+import sys
+import pymunk
 
-from svg_model.body_group import BodyGroup
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPainter, QColor, QPainterPath
+
 from svg_model.path_group import PathGroup
+from svg_model.body_group import BodyGroup
+
+
+
+class CustomWidget(QWidget):
+    def __init__(self, path_group_, body_group_):
+        super().__init__()
+        self.path_group = path_group_
+        self.body_group = body_group_
+        self.setMinimumSize(640, 480)
+        self.clicked_coords = None
+
+    def mousePressEvent(self, event):
+        x, y, width, height = self.path_group.get_bounding_box()
+        coords = self.translate([(event.x(), event.y())], -width / 2., -height / 2.0)[0]
+        shape = self.body_group.space.point_query_nearest(coords, max_distance=0, shape_filter=pymunk.ShapeFilter())
+
+        if shape:
+            print(self.body_group.get_name(shape.shape.body))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        self.draw_paths(painter)
+
+    def translate(self, coords, x, y):
+        return [(c[0] + x, c[1] + y) for c in coords]
+
+    def draw_path(self, painter, p):
+        color = QColor(*p.color) if p.color else QColor(Qt.black)
+        painter.setBrush(color)
+        for loop in p.loops:
+            path = QPainterPath()
+            path.moveTo(*loop.verts[0])
+            for v in loop.verts[1:]:
+                path.lineTo(*v)
+            path.closeSubpath()
+            painter.drawPath(path)
+
+    def draw_paths(self, painter):
+        x, y, width, height = self.path_group.get_bounding_box()
+        painter.translate(width / 2., height / 2.)
+        for p in self.body_group.paths.values():
+            self.draw_path(painter, p)
+
 
 if __name__ == '__main__':
+    app = QApplication(sys.argv)
+
     path_group = PathGroup.load_svg('circles.svg')
     body_group = BodyGroup(path_group.paths)
 
+    window = QMainWindow()
+    central_widget = CustomWidget(path_group, body_group)
+    window.setCentralWidget(central_widget)
+    window.show()
 
-    def translate(coords, x, y):
-        return [(c[0] + x, c[1] + y) for c in coords]
-
-
-    def on_click(widget, event):
-        x, y, width, height = path_group.get_bounding_box()
-        coords = translate([event.get_coords()], -width / 2., -height / 2.)[0]
-        shape = body_group.space.point_query_first(coords)
-        if shape:
-            print body_group.get_name(shape.body)
-
-
-    window = gtk.Window()
-    drawing_area = gtk.DrawingArea()
-    drawing_area.set_size_request(640, 480)
-    window.add(drawing_area)
-    window.show_all()
-
-    cr = drawing_area.window.cairo_create()
-
-
-    def draw_path(context, p):
-        context.save()
-        print 'draw_path color', [v / 255. for v in p.color]
-        context.set_source_rgb(*[v / 255. for v in p.color])
-        for loop in p.loops:
-            context.move_to(*loop.verts[0])
-            for v in loop.verts[1:]:
-                context.line_to(*v)
-            context.close_path()
-            context.fill()
-        context.restore()
-
-
-    def draw_rectangle():
-        cr.rectangle(0, 0, 100, 100)
-        cr.set_source_rgb(0, 0.5, 0)
-        cr.fill()
-
-
-    def draw_paths(*args, **kwargs):
-        x, y, width, height = path_group.get_bounding_box()
-        cr.save()
-        cr.translate(width / 2., height / 2.)
-        for p in body_group.paths.values():
-            draw_path(cr, p)
-        cr.restore()
-
-
-    drawing_area.add_events(gtk.gdk.BUTTON_PRESS_MASK)
-    drawing_area.connect('button-press-event', on_click)
-    window.connect('destroy', lambda x: gtk.main_quit())
-
-    gtk.main()
+    sys.exit(app.exec_())
