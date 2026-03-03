@@ -114,7 +114,7 @@ def get_adjacency_matrix(df_connected: pd.DataFrame) -> Tuple[np.ndarray, pd.Ser
     indexed_paths = pd.Series(sorted_path_keys)
     path_indexes = pd.Series(indexed_paths.index, index=sorted_path_keys)
 
-    adjacency_matrix = np.zeros((path_indexes.shape[0],) * 2, dtype=int)
+    adjacency_matrix = np.zeros((path_indexes.shape[0],) * 2, dtype=np.intp)
     for i_key, j_key in df_connected[['source', 'target']].values:
         i, j = path_indexes.loc[[i_key, j_key]]
         adjacency_matrix[i, j] = 1
@@ -175,7 +175,7 @@ def extract_connections(svg_source: str, shapes_canvas: ShapesCanvas, line_layer
     if line_xpath is None:
         # Define a query to look for `svg:line` elements in the top level of layer of
         # SVG specified to contain connections.
-        line_xpath = ("//svg:g[@inkscape:label='%s']/svg:line" % line_layer)
+        line_xpath = f"//svg:g[@inkscape:label='{line_layer}']/svg:line"
 
     for line_i in e_root.xpath(line_xpath, namespaces=namespaces):
         line_i_dict = dict(line_i.items())
@@ -225,7 +225,7 @@ def extract_connections(svg_source: str, shapes_canvas: ShapesCanvas, line_layer
                                           columns=['source', 'target'])
     # Order the source and target of each row so the source shape identifier is
     # always the lowest.
-    df_shape_connections_i.sort_index(axis=1, inplace=True)
+    df_shape_connections_i = df_shape_connections_i.sort_index(axis=1)
     # Tag each shape connection with the corresponding `svg:line`/`svg:path`
     # identifier.  May be useful, e.g., in debugging.
     df_shape_connections_i['line_id'] = df_connection_lines['id']

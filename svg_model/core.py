@@ -8,7 +8,12 @@ from .data_frame import get_bounding_boxes
 from io import StringIO
 from lxml import etree
 import pandas as pd
-import pint  # Unit conversion from inches to mm
+
+try:
+    from nadamq import ureg
+except ModuleNotFoundError:
+    import pint
+    ureg = pint.UnitRegistry()
 
 from ._version import get_versions
 
@@ -19,9 +24,6 @@ XHTML_NAMESPACE = "http://www.w3.org/2000/svg"
 NSMAP = {'svg': XHTML_NAMESPACE}
 INKSCAPE_NSMAP = NSMAP.copy()
 INKSCAPE_NSMAP['inkscape'] = 'https://www.inkscape.org/namespaces/inkscape'
-
-# Convert Inkscape pixels-per-inch (PPI) to pixels-per-mm (PPmm).
-ureg = pint.UnitRegistry()
 
 INKSCAPE_PPI = 90
 INKSCAPE_PPmm = INKSCAPE_PPI / (1 * ureg.inch).to('mm')

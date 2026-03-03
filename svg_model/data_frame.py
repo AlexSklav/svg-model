@@ -117,7 +117,7 @@ def get_svg_path_frame(svg_path) -> pd.DataFrame:
     frames = []
     for i, loop_i in enumerate(svg_path.loops):
         verts = pd.DataFrame(loop_i.verts, columns=['x', 'y'])
-        verts.insert(0, 'vertex_i', np.arange(verts.shape[0], dtype=int))
+        verts.insert(0, 'vertex_i', np.arange(verts.shape[0], dtype=np.intp))
         verts.insert(0, 'loop_i', i)
         frames.append(verts)
     return pd.concat(frames)

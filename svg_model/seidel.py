@@ -497,7 +497,7 @@ class Node:
 class Sink(Node):
 
     def __init__(self, trapezoid):
-        super(Sink, self).__init__(None, None)
+        super().__init__(None, None)
         self.trapezoid = trapezoid
         trapezoid.sink = self
 
@@ -514,7 +514,7 @@ def isink(trapezoid):
 class XNode(Node):
 
     def __init__(self, point, lchild, rchild):
-        super(XNode, self).__init__(lchild, rchild)
+        super().__init__(lchild, rchild)
         self.point = point
 
     def locate(self, edge):
@@ -526,7 +526,7 @@ class XNode(Node):
 class YNode(Node):
 
     def __init__(self, edge, lchild, rchild):
-        super(YNode, self).__init__(lchild, rchild)
+        super().__init__(lchild, rchild)
         self.edge = edge
 
     def locate(self, edge):

@@ -19,6 +19,7 @@ build:
 requirements:
     build:
         - python >=3.6
+        - setuptools
         - lxml
         - pandas
         - funcsigs
